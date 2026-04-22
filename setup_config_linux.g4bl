@@ -1,0 +1,228 @@
+# ============================================================
+#  mu_stop_scan.g4bl
+#  z=0 = front face of GasCell (reference plane)
+# ============================================================
+
+################################################################
+### PARAMETERS
+################################################################
+param -unset P_mbar=1000.0
+param -unset T_K=293.15
+param -unset GasMaterial=N2_gas
+
+param -unset nEvents=10000
+param -unset p0=30.0
+param -unset dpFWHM_percent=0.08
+
+param -unset sigX=5.0
+param -unset sigY=5.0
+param -unset sigXp=0.0
+param -unset sigYp=0.0
+
+### GAS CELL dimensions
+param -unset GasCell_W=84.0
+param -unset GasCell_H=72.0
+param -unset L_gas=200.0
+
+### VETO: 80x80 mm2, 4 mm thick, hole D=18 mm (R=9 mm)
+param -unset L_Veto=4
+param -unset W_Veto=80
+param -unset R_hole=9
+
+### ENTRANCE SCINTILLATOR: 20x20 mm2, 0.2 mm thick
+param -unset L_Entrance=0.2
+param -unset W_Entrance=20
+
+param -unset gapLength=23
+
+### WINDOW : cylindrical foil, variable thickness, radius = 3 mm
+param -unset WindowMaterial=Havar
+param -unset L_Window=1.0
+param -unset WindowRadius=11.0
+param -unset d_E2W=0.0
+
+### GAS CELL WALL
+param -unset wallMat=Al
+param -unset t_wall=1.0
+
+param -unset maxStep=0.05 
+
+param -unset outDir=/home/aloiselkb/g4bl_simu/output_tim_config
+
+################################################################
+### COLORS
+################################################################
+param bluegray=0.4,0.4,0.6
+param lightblue=0.5,0.7,1.0
+param greenscint=0.2,0.7,0.3
+
+################################################################
+### GAS DENSITY
+################################################################
+param Patm=($P_mbar/1013.25)
+param rhoN2=(0.0012506*$Patm*(273.15/$T_K))
+param rhoC2H4gas=(0.0012516*$Patm*(273.15/$T_K))
+param rhoCH4=(0.00071574*$Patm*(273.15/$T_K))
+material N2_gas   N,1.0              density=$rhoN2       state=gas
+material C2H4_gas C,0.8563 H,0.1437  density=$rhoC2H4gas  state=gas
+material CH4_gas  C,0.7487 H,0.2513  density=$rhoCH4      state=gas
+material C2H4 \
+    C,0.8563 \
+    H,0.1437 \
+    density=0.94
+material Havar \
+    Co,0.420 \
+    Cr,0.195 \
+    Ni,0.127 \
+    W,0.027 \
+    Mo,0.022 \
+    Mn,0.016 \
+    C,0.002 \
+    Be,0.0005 \
+    Fe,0.1905 \
+    density=8.3
+################################################################
+### PHYSICS / CUTS
+################################################################
+physics FTFP_BERT_EMZ
+trackcuts maxTime=1e9
+trackcuts keep=mu-
+param maxStep=$maxStep
+
+################################################################
+### Z POSITIONS
+################################################################
+param z_gas0=0.0
+param z_gas1=($z_gas0+$L_gas)
+
+# gap entre back face scint et front face window
+param gap_E2W=20.0
+
+# Window collée au gaz (back face window = z_gas0)
+param z_win_front=($z_gas0-$L_Window)
+
+# Scintillateur
+param z_ent_front=($z_win_front-$gap_E2W-$L_Entrance)
+
+param z_veto_front=($z_ent_front-$gapLength-$L_Veto)
+param z_beam=($z_veto_front-5.0)
+
+# --- back faces (useful for diagnostics) ---
+param z_veto_back=($z_veto_front+$L_Veto)
+param z_ent_back=($z_ent_front+$L_Entrance)
+param z_win_back=($z_win_front+$L_Window)
+
+################################################################
+### GEOMETRY
+################################################################
+
+# -- Veto: 80x80 mm2 box with D=18mm (R=9mm) central hole -----
+box  vetoBoxSolid  height=$W_Veto  width=$W_Veto  length=$L_Veto \
+  material=Scintillator
+
+tubs vetoHoleSolid  length=($L_Veto+2.0)  radius=$R_hole \
+  material=Scintillator
+
+boolean op=subtraction vetoFinal vetoBoxSolid vetoHoleSolid \
+  material=Scintillator \
+  color=$bluegray,1.0
+
+place vetoFinal z=$z_veto_front front=1 rename=VetoDetector
+
+# -- Entrance scintillator: 20x20 mm2, 0.2 mm, mu- only -------
+virtualdetector EntranceDet \
+  height=$W_Entrance \
+  width=$W_Entrance \
+  length=$L_Entrance \
+  material=Scintillator \
+  require=(PDGid==13) \
+  format=asciiExtended \
+  file=$outDir/EntranceDet.txt \
+  color=$greenscint,0.6
+
+place EntranceDet z=$z_ent_front front=1 rename=EntranceScintillator
+
+# -- Entry window: cylindrical foil, D = 11 mm -----------------
+tubs WindowSolid \
+  radius=$WindowRadius \
+  length=$L_Window \
+  material=$WindowMaterial \
+  color=$lightblue,0.5
+
+place WindowSolid z=$z_win_front front=1 rename=EntryWindow
+
+# -- Gas cell : rectangular box 84 x 72 x 115 mm ---------------
+box GasSolid \
+  width=$GasCell_W \
+  height=$GasCell_H \
+  length=$L_gas \
+  material=$GasMaterial \
+  maxStep=$maxStep \
+  color=0.2,0.6,1.0,0.15
+
+place GasSolid z=$z_gas0 front=1 rename=GasCell
+
+# -- Optional end wall (same transverse dimensions as gas cell) -
+# box WallSolid \
+#   width=$GasCell_W \
+#   height=$GasCell_H \
+#   length=$t_wall \
+#   material=$wallMat
+#
+# place WallSolid z=$z_gas1 front=1 rename=EndWall
+
+
+################################################################
+### DIAGNOSTIC ZNTUPLES (before/after elements)
+################################################################
+param zVetoInFile=$outDir/Veto_in.txt
+param zVetoOutFile=$outDir/Veto_out.txt
+param zScintInFile=$outDir/Scint_in.txt
+param zScintOutFile=$outDir/Scint_out.txt
+param zWinInFile=$outDir/Win_in.txt
+param zWinOutFile=$outDir/Win_out.txt
+
+# before/after Veto
+zntuple z=$z_veto_front format=asciiExtended file=$zVetoInFile
+zntuple z=$z_veto_back  format=asciiExtended file=$zVetoOutFile
+
+# before/after Entrance scintillator
+zntuple z=$z_ent_front format=asciiExtended file=$zScintInFile
+zntuple z=$z_ent_back  format=asciiExtended file=$zScintOutFile
+
+# before/after Window
+zntuple z=$z_win_front format=asciiExtended file=$zWinInFile
+zntuple z=$z_win_back  format=asciiExtended file=$zWinOutFile
+
+################################################################
+### OUTPUTS
+################################################################
+param zinFile=$outDir/Zin.txt
+param zoutFile=$outDir/Zout.txt
+
+zntuple z=$z_gas0 format=asciiExtended file=$zinFile
+zntuple z=$z_gas1 format=asciiExtended file=$zoutFile
+
+# scan planes inside gas
+param -unset Nscan=400
+param dz_scan=($L_gas/$Nscan)
+param i_last=($Nscan-1)
+
+do i 0 $i_last 1
+    param zpos=(($i+0.5)*$dz_scan)
+    zntuple z=$zpos format=asciiExtended file=$outDir/ScanZ_$i.txt
+enddo
+################################################################
+### BEAM
+################################################################
+param sigmaP=($p0*($dpFWHM_percent/100.0)/2.355)
+
+beam gaussian \
+  particle=mu- \
+  nEvents=$nEvents \
+  meanMomentum=$p0 \
+  sigmaP=$sigmaP \
+  sigmaX=$sigX sigmaY=$sigY \
+  sigmaXp=$sigXp sigmaYp=$sigYp \
+  beamX=0 beamY=0 beamZ=$z_beam
+
